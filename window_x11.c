@@ -60,17 +60,12 @@ const char** window_extensions_get(uint32_t* extension_count)
     return neededexts_inst_str;
 }
 
-int window_create(const char* title, const VkInstance instance, VkSurfaceKHR* surface, struct window* window)
+int window_create(struct window* window)
 {
     struct winapi* winapi;
-    VkXlibSurfaceCreateInfoKHR xlib_sfc_createinfo;
-
-
     window->__winapi = malloc(sizeof(struct winapi));
 
-
     winapi = window->__winapi;
-    window->title = title;
 
     /* create x11 window */
     winapi->swa.event_mask = ExposureMask |
@@ -84,7 +79,7 @@ int window_create(const char* title, const VkInstance instance, VkSurfaceKHR* su
             CopyFromParent, InputOutput, CopyFromParent,
             CWEventMask, &winapi->swa);
 
-    if(!winapi->win)
+    if(winapi->win == None)
     {
         perror("XCreateWindow");
         return 0;
@@ -92,6 +87,16 @@ int window_create(const char* title, const VkInstance instance, VkSurfaceKHR* su
     XSetWMProtocols(dpy, winapi->win, &wm_delete, 1);
     XMapWindow(dpy,winapi->win);
     XStoreName(dpy, winapi->win, window->title);
+
+    window->RUNNING = 1;
+    
+    return 1;
+}
+
+int window_vk(const VkInstance instance, VkSurfaceKHR* surface, struct window* window)
+{
+    struct winapi* winapi = window->__winapi;
+    VkXlibSurfaceCreateInfoKHR xlib_sfc_createinfo;
 
     memset(&xlib_sfc_createinfo, 0, sizeof(VkXlibSurfaceCreateInfoKHR));
     xlib_sfc_createinfo.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
@@ -106,7 +111,6 @@ int window_create(const char* title, const VkInstance instance, VkSurfaceKHR* su
 
     return 1;
 }
-
 int window_poll(struct window* window)
 {
     struct winapi* winapi = window->__winapi;
@@ -116,7 +120,7 @@ int window_poll(struct window* window)
     XPeekEvent(dpy, &ev);
     if(ev.type == ClientMessage && ev.xclient.data.l[0] == wm_delete && ev.xclient.window == winapi->win)
     {
-        window->running = 1;
+        window->RUNNING = 0;
         return 0;
     }
 
