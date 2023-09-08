@@ -18,9 +18,9 @@ struct window
 
 int window_init();
 void window_terminate();
+const char** window_extensions_get(uint32_t* extension_count); 
 
 int window_create(struct window* window);
-const char** window_extensions_get(uint32_t* extension_count); 
 int window_poll(struct window* window);
 void window_destroy(struct window* window);
 
