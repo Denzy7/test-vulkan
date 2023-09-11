@@ -1,3 +1,5 @@
+#ifndef WINDOW_H
+#define WINDOW_H
 #include <stdint.h>
 
 #ifdef WINDOW_VK
@@ -15,7 +17,9 @@ struct window
     /*RESERVED*/
     void* __winapi;
 };
-
+#ifdef _cplusplus
+extern "C" {
+#endif
 int window_init();
 void window_terminate();
 const char** window_extensions_get(uint32_t* extension_count); 
@@ -27,4 +31,7 @@ void window_destroy(struct window* window);
 #ifdef WINDOW_VK
 int window_vk(const VkInstance instance, VkSurfaceKHR* surface, struct window* window);
 #endif
-
+#ifdef _cplusplus
+}
+#endif
+#endif
