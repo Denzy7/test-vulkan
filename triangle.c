@@ -5,7 +5,7 @@
 
 #define WINDOW_VK
 #include "window.h"
-
+#include "spv.h"
 
 PFN_vkCreateDebugUtilsMessengerEXT create_dbg_util_msgr = NULL;
 PFN_vkDestroyDebugUtilsMessengerEXT destroy_dbg_util_msgr = NULL;
@@ -54,6 +54,7 @@ int main(int argc, char** argv)
     long f_sz;
     /*void* mem;*/
     uint32_t* mem_u32;
+    struct spv spv;
 
     int uselayers = 0;
 
@@ -507,41 +508,30 @@ int main(int argc, char** argv)
     }
 
     memset(&vk_shadermod_createinfo, 0, sizeof(VkShaderModuleCreateInfo));
+    memset(&spv, 0, sizeof(struct spv));
+
     vk_shadermod_createinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 
-
-    f = fopen("vert.spv", "rb");
-    fseek(f, 0, SEEK_END);
-    f_sz = ftell(f);
-    mem_u32 = malloc(f_sz);
-    rewind(f);
-    fread(mem_u32, 1, f_sz, f);
-    vk_shadermod_createinfo.codeSize = f_sz;
-    vk_shadermod_createinfo.pCode = mem_u32;
+    spv_load("vert.spv", &spv);
+    vk_shadermod_createinfo.codeSize = spv.sz;
+    vk_shadermod_createinfo.pCode = spv.code;
     if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_vert) != VK_SUCCESS)
     {
         perror("cant create vert shader");
         return 1;
     }
-    free(mem_u32);
-    fclose(f);
+    spv_free(&spv);
 
-    f = fopen("frag.spv", "rb");
-    fseek(f, 0, SEEK_END);
-    f_sz = ftell(f);
-    mem_u32 = malloc(f_sz);
-    rewind(f);
-    fread(mem_u32, 1, f_sz, f);
-    vk_shadermod_createinfo.codeSize = f_sz;
-    vk_shadermod_createinfo.pCode = mem_u32;
+    spv_load("frag.spv", &spv);
+    vk_shadermod_createinfo.codeSize = spv.sz;
+    vk_shadermod_createinfo.pCode = spv.code;
     if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_frag) != VK_SUCCESS)
     {
         perror("cant create frag shader");
         return 1;
     }
-    free(mem_u32);
-    fclose(f);
-
+    spv_free(&spv);
+    
     vk_pipeline_shader_createinfo[0].module = vk_shader_vert;
     vk_pipeline_shader_createinfo[1].module = vk_shader_frag;
 

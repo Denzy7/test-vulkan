@@ -15,9 +15,18 @@ elseif(WIN32)
     message("using win32")
     list(APPEND window_src window_win32.c)
 endif()
+
+#spv loader
+if(ANDROID_NDK)
+    #list(APPEND window_src spv_android.c)
+else()
+    list(APPEND window_src spv_stdio.c)
+endif()
+
 set(exes 
     triangle 
     test_windowbasic)
+
 foreach(exe ${exes})
     add_executable(${exe} ${exe}.c ${window_src})
     target_link_libraries(${exe} ${window_libs})
