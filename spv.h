@@ -7,6 +7,9 @@ struct spv
 {
     uint32_t* code;
     size_t sz;
+
+    /*user reserved*/
+    void* _aassetmanager;
 };
 
 int spv_load(const char* file, struct spv* spv);
