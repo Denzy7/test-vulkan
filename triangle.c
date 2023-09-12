@@ -46,7 +46,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugcallback(VkDebugUtilsMessageSeverityF
     return VK_FALSE;
 }
 
-int main()
+int main(int argc, char** argv)
 {
     /* common */
     uint32_t i, j;
@@ -54,6 +54,8 @@ int main()
     long f_sz;
     /*void* mem;*/
     uint32_t* mem_u32;
+
+    int uselayers = 0;
 
     struct window window;
 
@@ -176,6 +178,12 @@ int main()
     VkClearValue vk_clear;
     VkPresentInfoKHR vk_presentinfo;
 
+    for(i = 0; i < argc; i++)
+    {
+        if(strstr(argv[i], "-uselayers") != NULL)
+            uselayers = 1;
+    }
+
     if(!window_init())
         return 1;
 
@@ -274,7 +282,8 @@ int main()
     vk_inst_createinfo.pApplicationInfo = &vk_appinfo;
     vk_inst_createinfo.enabledExtensionCount = ext_needed_inst;
     vk_inst_createinfo.ppEnabledExtensionNames = neededexts_inst_str;
-    vk_inst_createinfo.enabledLayerCount = arysz(neededlayers_str);
+    if(uselayers)
+        vk_inst_createinfo.enabledLayerCount = arysz(neededlayers_str);
     vk_inst_createinfo.ppEnabledLayerNames = neededlayers_str;
     vk_inst_createinfo.pNext = &vk_dbgmsg_createinfo;
 
