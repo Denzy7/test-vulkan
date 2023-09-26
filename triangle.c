@@ -29,6 +29,7 @@ static const char* neededexts_dev_str[] =
 static const char* neededlayers_str[] =
 {
     "VK_LAYER_KHRONOS_validation",
+    /*"VK_LAYER_MANGOHUD_overlay_x86_64"*/
     /*"VK_LAYER_LUNARG_api_dump"*/
 };
 
@@ -159,15 +160,15 @@ int main(int argc, char** argv)
     VkCommandPoolCreateInfo vk_cmdpool_createinfo;
     VkCommandPool vk_cmdpool;
     VkCommandBufferAllocateInfo vk_cmdbuf_allocinfo;
-    VkCommandBuffer vk_cmdbuf;
+    VkCommandBuffer* vk_cmdbuf;
     VkCommandBufferBeginInfo vk_cmdbuf_begininfo;
     VkRenderPassBeginInfo vk_renderpass_begininfo;
 
     VkSemaphoreCreateInfo vk_semphr_createinfo;
-    VkSemaphore vk_semphr_imgavail;
-    VkSemaphore vk_semphr_rendered;
+    VkSemaphore* vk_semphr_imgavail;
+    VkSemaphore* vk_semphr_rendered;
     VkFenceCreateInfo vk_fen_creatinfo;
-    VkFence vk_fen_tosfc;
+    VkFence* vk_fen_tosfc;
     VkSubmitInfo vk_submitinfo;
     VkPipelineStageFlags vk_pipeline_stagewait[] = 
     {
@@ -178,11 +179,15 @@ int main(int argc, char** argv)
     uint32_t vk_swapchain_imgidx;
     VkClearValue vk_clear;
     VkPresentInfoKHR vk_presentinfo;
+    int vk_buffered_frames = 3, vk_current_frame = 0;
 
     for(i = 0; i < argc; i++)
     {
         if(strstr(argv[i], "-uselayers") != NULL)
             uselayers = 1;
+        if(strstr(argv[i], "-bufferframes") != NULL
+                && argv[i + 1] != NULL)
+            sscanf(argv[i + 1], "%d", &vk_buffered_frames);
     }
 
     if(!window_init())
@@ -694,12 +699,14 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    vk_cmdbuf = malloc(sizeof(VkCommandBuffer) * vk_buffered_frames);
+
     memset(&vk_cmdbuf_allocinfo, 0, sizeof(VkCommandBufferAllocateInfo));
     vk_cmdbuf_allocinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     vk_cmdbuf_allocinfo.commandPool = vk_cmdpool;
-    vk_cmdbuf_allocinfo.commandBufferCount = 1;
+    vk_cmdbuf_allocinfo.commandBufferCount = vk_buffered_frames;
     vk_cmdbuf_allocinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    if(vkAllocateCommandBuffers(vk_dev, &vk_cmdbuf_allocinfo, &vk_cmdbuf) != VK_SUCCESS)
+    if(vkAllocateCommandBuffers(vk_dev, &vk_cmdbuf_allocinfo, vk_cmdbuf) != VK_SUCCESS)
     {
         perror("vkAllocateCommandBuffers");
         return 1;
@@ -712,10 +719,18 @@ int main(int argc, char** argv)
     vk_fen_creatinfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     vk_fen_creatinfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    if(vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_imgavail) || vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_rendered) || vkCreateFence(vk_dev, &vk_fen_creatinfo, NULL, &vk_fen_tosfc) != VK_SUCCESS)
+    vk_semphr_imgavail = malloc(sizeof(VkSemaphore) * vk_buffered_frames);
+    vk_semphr_rendered = malloc(sizeof(VkSemaphore) * vk_buffered_frames);
+    vk_fen_tosfc = malloc(sizeof(VkFence) * vk_buffered_frames);
+
+    for(i = 0; i < vk_buffered_frames; i++)
     {
-        perror("failed to create sync objs");
-        return 1;
+
+        if(vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_imgavail[i]) || vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_rendered[i]) || vkCreateFence(vk_dev, &vk_fen_creatinfo, NULL, &vk_fen_tosfc[i]) != VK_SUCCESS)
+        {
+            perror("failed to create sync objs");
+            return 1;
+        }
     }
 
     memset(&vk_cmdbuf_begininfo, 0, sizeof(VkCommandBufferBeginInfo));
@@ -739,17 +754,13 @@ int main(int argc, char** argv)
     memset(&vk_submitinfo, 0, sizeof(VkSubmitInfo));
     vk_submitinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     vk_submitinfo.waitSemaphoreCount = 1;
-    vk_submitinfo.pWaitSemaphores = &vk_semphr_imgavail;
     vk_submitinfo.pWaitDstStageMask = vk_pipeline_stagewait;
     vk_submitinfo.commandBufferCount = 1;
-    vk_submitinfo.pCommandBuffers = &vk_cmdbuf;
     vk_submitinfo.signalSemaphoreCount = 1;
-    vk_submitinfo.pSignalSemaphores = &vk_semphr_rendered;
 
     memset(&vk_presentinfo, 0, sizeof(VkPresentInfoKHR));
     vk_presentinfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     vk_presentinfo.waitSemaphoreCount = 1;
-    vk_presentinfo.pWaitSemaphores = &vk_semphr_rendered;
     vk_presentinfo.swapchainCount = 1;
     vk_presentinfo.pSwapchains = &vk_swapchain;
         
@@ -760,46 +771,54 @@ int main(int argc, char** argv)
         window_poll(&window);
 
         /*draw time ! */
-        vkWaitForFences(vk_dev, 1, &vk_fen_tosfc, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(vk_dev, 1, &vk_fen_tosfc[vk_current_frame], VK_TRUE, UINT64_MAX);
 
-        vkResetFences(vk_dev, 1, &vk_fen_tosfc);
+        vkResetFences(vk_dev, 1, &vk_fen_tosfc[vk_current_frame]);
 
-        vkAcquireNextImageKHR(vk_dev, vk_swapchain, UINT64_MAX, vk_semphr_imgavail, NULL, &vk_swapchain_imgidx);
+        vkAcquireNextImageKHR(vk_dev, vk_swapchain, UINT64_MAX, vk_semphr_imgavail[vk_current_frame], NULL, &vk_swapchain_imgidx);
 
-        vkResetCommandBuffer(vk_cmdbuf, 0);
+        vkResetCommandBuffer(vk_cmdbuf[vk_current_frame], 0);
 
-        if(vkBeginCommandBuffer(vk_cmdbuf, &vk_cmdbuf_begininfo) != VK_SUCCESS)
+        if(vkBeginCommandBuffer(vk_cmdbuf[vk_current_frame], &vk_cmdbuf_begininfo) != VK_SUCCESS)
         {
             perror("vkBeginCommandBuffer");
             return 1;
         }
         vk_renderpass_begininfo.framebuffer = vk_fbuf[vk_swapchain_imgidx];
-        vkCmdBeginRenderPass(vk_cmdbuf, &vk_renderpass_begininfo, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(vk_cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
-        vkCmdDraw(vk_cmdbuf, 3, 1, 0, 0);
-        vkCmdEndRenderPass(vk_cmdbuf);
+        vkCmdBeginRenderPass(vk_cmdbuf[vk_current_frame], &vk_renderpass_begininfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(vk_cmdbuf[vk_current_frame], VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
+        vkCmdDraw(vk_cmdbuf[vk_current_frame], 3, 1, 0, 0);
+        vkCmdEndRenderPass(vk_cmdbuf[vk_current_frame]);
 
-        if(vkEndCommandBuffer(vk_cmdbuf) != VK_SUCCESS)
+        if(vkEndCommandBuffer(vk_cmdbuf[vk_current_frame]) != VK_SUCCESS)
         {
             perror("vkEndCommandBUffer");
             return 1;
         }
 
-        if(vkQueueSubmit(q_gfx, 1, &vk_submitinfo, vk_fen_tosfc) != VK_SUCCESS)
+        vk_submitinfo.pWaitSemaphores = &vk_semphr_imgavail[vk_current_frame];
+        vk_submitinfo.pSignalSemaphores = &vk_semphr_rendered[vk_current_frame];
+        vk_submitinfo.pCommandBuffers = &vk_cmdbuf[vk_current_frame];
+        if(vkQueueSubmit(q_gfx, 1, &vk_submitinfo, vk_fen_tosfc[vk_current_frame]) != VK_SUCCESS)
         {
             perror("vkQueueSubmit");
             return 1;
         }
 
          vk_presentinfo.pImageIndices = &vk_swapchain_imgidx;
+         vk_presentinfo.pWaitSemaphores = &vk_semphr_rendered[vk_current_frame];
          vkQueuePresentKHR(q_gfx, &vk_presentinfo);
+         vk_current_frame = (vk_current_frame + 1) % vk_buffered_frames;
     }
 
     vkDeviceWaitIdle(vk_dev);
 
-    vkDestroySemaphore(vk_dev, vk_semphr_rendered, NULL);
-    vkDestroySemaphore(vk_dev, vk_semphr_imgavail, NULL);
-    vkDestroyFence(vk_dev, vk_fen_tosfc, NULL);
+    for(i = 0; i < vk_buffered_frames; i++)
+    {
+        vkDestroySemaphore(vk_dev, vk_semphr_rendered[i], NULL);
+        vkDestroySemaphore(vk_dev, vk_semphr_imgavail[i], NULL);
+        vkDestroyFence(vk_dev, vk_fen_tosfc[i], NULL);
+    }
 
         for(i = 0; i < vk_swapchain_imgs_count; i++)
     {
@@ -837,6 +856,10 @@ int main(int argc, char** argv)
     free(vk_swapchain_imgs);
     free(vk_swapchain_imgs_views);
     free(vk_fbuf);
+    free(vk_cmdbuf);
+    free(vk_semphr_imgavail);
+    free(vk_semphr_rendered);
+    free(vk_fen_tosfc);
 
     return 0;
 }
