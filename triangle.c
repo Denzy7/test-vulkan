@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <vulkan/vulkan_core.h>
 
 #define WINDOW_VK
 #include "window.h"
@@ -18,7 +19,11 @@ struct needed_ext_or_layer
     int has;
 };
 
-
+struct vertex
+{
+    float aPos[3];
+    float aColour[3];
+};
 
 static const char* neededexts_dev_str[] =
 {
@@ -47,13 +52,30 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugcallback(VkDebugUtilsMessageSeverityF
     return VK_FALSE;
 }
 
+uint32_t findmem(VkPhysicalDevice phydev, uint32_t type, VkMemoryPropertyFlags flag)
+{
+    uint32_t i;
+    VkPhysicalDeviceMemoryProperties vk_phydev_memprops;
+    vkGetPhysicalDeviceMemoryProperties(phydev, &vk_phydev_memprops);
+for(i = 0; i < vk_phydev_memprops.memoryTypeCount; i++)
+    {
+        if((type & (1 << i) &&
+            (vk_phydev_memprops.memoryTypes[i].propertyFlags & flag) == flag)) 
+        {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     /* common */
     uint32_t i, j;
     FILE* f;
     long f_sz;
-    /*void* mem;*/
+    void* mem;
     uint32_t* mem_u32;
     struct spv spv;
 
@@ -132,6 +154,16 @@ int main(int argc, char** argv)
             NULL
         },
     };
+    struct vertex vertices[] = 
+    {
+        {{-0.5f, 0.5f, 0.0f},{1.0f, 0.0f, 0.0f}},
+        {{0.0f, -0.5f, 0.0f},{0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.0f},{0.0f, 0.0f, 1.0f}},
+    };
+    VkVertexInputBindingDescription vk_vertexbind_desc;
+    VkVertexInputAttributeDescription vk_vertexattr_desc[2]; /* aPos and aColour */
+    VkMemoryRequirements vk_memreq;
+    VkMemoryAllocateInfo vk_memallocinfo;
     VkPipelineVertexInputStateCreateInfo vk_pipeline_vertexinput;
     VkPipelineInputAssemblyStateCreateInfo vk_pipeline_inputassembly;
     VkViewport vk_viewport;
@@ -159,6 +191,10 @@ int main(int argc, char** argv)
     VkFramebuffer* vk_fbuf;
     VkCommandPoolCreateInfo vk_cmdpool_createinfo;
     VkCommandPool vk_cmdpool;
+    VkBufferCreateInfo vk_vbuf_createinfo;
+    VkBuffer vk_vbuf;
+    VkDeviceMemory vk_vbuf_mem;
+    VkDeviceSize vk_vbuf_off[] = {0};
     VkCommandBufferAllocateInfo vk_cmdbuf_allocinfo;
     VkCommandBuffer* vk_cmdbuf;
     VkCommandBufferBeginInfo vk_cmdbuf_begininfo;
@@ -540,9 +576,28 @@ int main(int argc, char** argv)
     vk_pipeline_shader_createinfo[0].module = vk_shader_vert;
     vk_pipeline_shader_createinfo[1].module = vk_shader_frag;
 
+    memset(&vk_vertexbind_desc, 0, sizeof(VkVertexInputBindingDescription));
+    vk_vertexbind_desc.binding = 0;
+    vk_vertexbind_desc.stride = sizeof(struct vertex);
+    vk_vertexbind_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    memset(&vk_vertexattr_desc, 0, sizeof(vk_vertexattr_desc)); 
+    vk_vertexattr_desc[0].binding = 0;
+    vk_vertexattr_desc[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    vk_vertexattr_desc[0].location = 0;
+    vk_vertexattr_desc[0].offset = offsetof(struct vertex, aPos);
+
+    vk_vertexattr_desc[1].binding = 0;
+    vk_vertexattr_desc[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    vk_vertexattr_desc[1].location = 1;
+    vk_vertexattr_desc[1].offset = offsetof(struct vertex, aColour);
+
     memset(&vk_pipeline_vertexinput, 0, sizeof(VkPipelineVertexInputStateCreateInfo));
     vk_pipeline_vertexinput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    /* vertices in shader 😏*/
+    vk_pipeline_vertexinput.vertexBindingDescriptionCount = 1;
+    vk_pipeline_vertexinput.pVertexBindingDescriptions = &vk_vertexbind_desc;
+    vk_pipeline_vertexinput.vertexAttributeDescriptionCount = arysz(vk_vertexattr_desc);
+    vk_pipeline_vertexinput.pVertexAttributeDescriptions = vk_vertexattr_desc;
 
     memset(&vk_pipeline_inputassembly, 0, sizeof(VkPipelineInputAssemblyStateCreateInfo));
     /* primrestart..=0 */
@@ -688,6 +743,38 @@ int main(int argc, char** argv)
         }
     }
 
+
+    memset(&vk_vbuf_createinfo, 0, sizeof(vk_vbuf_createinfo));
+    vk_vbuf_createinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vk_vbuf_createinfo.size = sizeof(vertices);
+    vk_vbuf_createinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vk_vbuf_createinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if(vkCreateBuffer(vk_dev, &vk_vbuf_createinfo, NULL, &vk_vbuf) != VK_SUCCESS)
+    {
+        perror("vkCreateBuffer");
+        return 1;
+    }
+
+    vkGetBufferMemoryRequirements(vk_dev, vk_vbuf, &vk_memreq);
+    memset(&vk_memallocinfo, 0, sizeof(vk_memallocinfo));
+    vk_memallocinfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    vk_memallocinfo.allocationSize = vk_memreq.size;
+    vk_memallocinfo.memoryTypeIndex = findmem(vk_phydevs[usephydev], vk_memreq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    
+    if(vkAllocateMemory(vk_dev, &vk_memallocinfo, NULL, &vk_vbuf_mem) != VK_SUCCESS)
+    {
+        perror("vkAllocateMemory");
+        return 1;
+    }
+    vkBindBufferMemory(vk_dev, vk_vbuf, vk_vbuf_mem, 0);
+    if(vkMapMemory(vk_dev, vk_vbuf_mem, 0, vk_vbuf_createinfo.size, 0, &mem) != VK_SUCCESS)
+    {
+        perror("vkMapMemory");
+        return 1;
+    }
+    memcpy(mem, vertices, vk_vbuf_createinfo.size);
+    vkUnmapMemory(vk_dev, vk_vbuf_mem);
+
     memset(&vk_cmdpool_createinfo, 0, sizeof(VkCommandPoolCreateInfo));
     vk_cmdpool_createinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     vk_cmdpool_createinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -697,8 +784,7 @@ int main(int argc, char** argv)
     {
         perror("vkCreateCommandPool");
         return 1;
-    }
-
+    }   
     vk_cmdbuf = malloc(sizeof(VkCommandBuffer) * vk_buffered_frames);
 
     memset(&vk_cmdbuf_allocinfo, 0, sizeof(VkCommandBufferAllocateInfo));
@@ -787,7 +873,8 @@ int main(int argc, char** argv)
         vk_renderpass_begininfo.framebuffer = vk_fbuf[vk_swapchain_imgidx];
         vkCmdBeginRenderPass(vk_cmdbuf[vk_current_frame], &vk_renderpass_begininfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(vk_cmdbuf[vk_current_frame], VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
-        vkCmdDraw(vk_cmdbuf[vk_current_frame], 3, 1, 0, 0);
+        vkCmdBindVertexBuffers(vk_cmdbuf[vk_current_frame], 0, 1, &vk_vbuf, vk_vbuf_off);
+        vkCmdDraw(vk_cmdbuf[vk_current_frame], arysz(vertices), 1, 0, 0);
         vkCmdEndRenderPass(vk_cmdbuf[vk_current_frame]);
 
         if(vkEndCommandBuffer(vk_cmdbuf[vk_current_frame]) != VK_SUCCESS)
@@ -813,6 +900,8 @@ int main(int argc, char** argv)
 
     vkDeviceWaitIdle(vk_dev);
 
+    vkDestroyBuffer(vk_dev, vk_vbuf, NULL);
+    vkFreeMemory(vk_dev, vk_vbuf_mem, NULL);
     for(i = 0; i < vk_buffered_frames; i++)
     {
         vkDestroySemaphore(vk_dev, vk_semphr_rendered[i], NULL);
