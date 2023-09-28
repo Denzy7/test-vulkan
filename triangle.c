@@ -524,6 +524,7 @@ int vkmain(int argc, char** argv)
     if(vk_swapchain_createinfo.compositeAlpha == 0)
     {
         fprintf(stderr, "cannot find compatible composite alpha\n");
+        return 1;
     }
     vk_swapchain_createinfo.presentMode = vk_sfc_presentmodes[vk_sfc_presentmode_ok];
     vk_swapchain_createinfo.clipped = VK_TRUE;
