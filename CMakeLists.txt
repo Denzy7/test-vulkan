@@ -14,16 +14,10 @@ if(X11_FOUND)
 elseif(WIN32)
     message("using win32")
     list(APPEND window_src window_win32.c)
-elseif(ANDROID_NDK)
-    list(APPEND window_libs android)
 endif()
 
 #spv loader
-if(ANDROID_NDK)
-    list(APPEND window_src spv_andk.c)
-else()
-    list(APPEND window_src spv_stdio.c)
-endif()
+list(APPEND window_src spv_stdio.c)
 
 set(exes 
     triangle 
