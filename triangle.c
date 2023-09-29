@@ -124,11 +124,11 @@ int vkmain(int argc, char** argv)
     VkInstanceCreateInfo vk_inst_createinfo;
     VkDebugUtilsMessengerCreateInfoEXT vk_dbgmsg_createinfo;
     VkDebugUtilsMessengerEXT vk_dbgmsg;
-    uint32_t ext_count_inst, layer_count;
+    uint32_t ext_count_inst, layer_count = 0;
     uint32_t ext_needed_inst;
     const char** neededexts_inst_str; 
     VkExtensionProperties* vk_extprops_inst;
-    VkLayerProperties* vk_layerprops;
+    VkLayerProperties* vk_layerprops = NULL;
 
     VkResult vkres;
     VkInstance vk_inst;
