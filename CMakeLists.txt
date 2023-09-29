@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(test_vulkan)
+project(test_vulkan LANGUAGES C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 find_package(X11)
 find_package(Vulkan)
@@ -27,4 +27,12 @@ foreach(exe ${exes})
     add_executable(${exe} ${exe}.c ${window_src})
     target_link_libraries(${exe} ${window_libs})
     target_include_directories(${exe} PRIVATE ${window_include})
+    set_target_properties(
+        ${exe} PROPERTIES
+        C_STANDARD 90)
+    if(NOT MSVC)
+        target_compile_options(
+            ${exe} PRIVATE
+            -Wall -Werror -pedantic)
+    endif()
 endforeach()

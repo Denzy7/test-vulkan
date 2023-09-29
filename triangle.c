@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <vulkan/vulkan_core.h>
 
 #define WINDOW_VK
@@ -70,14 +71,50 @@ for(i = 0; i < vk_phydev_memprops.memoryTypeCount; i++)
     return 0;
 }
 
+int mkbuffer(VkPhysicalDevice phydev, VkDevice dev, VkDeviceSize size, VkBufferUsageFlags usage,
+        VkMemoryPropertyFlags props, VkBuffer* buffer,
+        VkDeviceMemory* memory)
+{
+    VkBufferCreateInfo createinfo;
+    VkMemoryRequirements require;
+    VkMemoryAllocateInfo allocinfo;
+
+    memset(&createinfo, 0, sizeof(createinfo));
+    createinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    createinfo.size = size;
+    createinfo.usage = usage;
+    createinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if(vkCreateBuffer(dev, &createinfo, NULL, buffer) 
+            != VK_SUCCESS)
+    {
+        perror("vkCreateBuffer");
+        return 0;
+    }
+
+    memset(&require, 0, sizeof(require));
+    vkGetBufferMemoryRequirements(dev, *buffer, &require);
+    memset(&allocinfo, 0, sizeof(allocinfo));
+    allocinfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocinfo.allocationSize = require.size;
+    allocinfo.memoryTypeIndex = findmem(phydev,require.memoryTypeBits, props);
+
+    if(vkAllocateMemory(dev, &allocinfo, NULL, memory) !=
+            VK_SUCCESS)
+    {
+        perror("vkAllocateMemory");
+        return 1;
+    }
+    
+    vkBindBufferMemory(dev, *buffer, *memory, 0);
+    return 1;
+}
+
 int vkmain(int argc, char** argv)
 {
     /* common */
     uint32_t i, j;
-    FILE* f;
-    long f_sz;
     void* mem;
-    uint32_t* mem_u32;
     struct spv spv;
 
     struct window vkwindow;
@@ -162,8 +199,6 @@ int vkmain(int argc, char** argv)
     };
     VkVertexInputBindingDescription vk_vertexbind_desc;
     VkVertexInputAttributeDescription vk_vertexattr_desc[2]; /* aPos and aColour */
-    VkMemoryRequirements vk_memreq;
-    VkMemoryAllocateInfo vk_memallocinfo;
     VkPipelineVertexInputStateCreateInfo vk_pipeline_vertexinput;
     VkPipelineInputAssemblyStateCreateInfo vk_pipeline_inputassembly;
     VkViewport vk_viewport;
@@ -191,7 +226,6 @@ int vkmain(int argc, char** argv)
     VkFramebuffer* vk_fbuf;
     VkCommandPoolCreateInfo vk_cmdpool_createinfo;
     VkCommandPool vk_cmdpool;
-    VkBufferCreateInfo vk_vbuf_createinfo;
     VkBuffer vk_vbuf;
     VkDeviceMemory vk_vbuf_mem;
     VkDeviceSize vk_vbuf_off[] = {0};
@@ -762,37 +796,17 @@ int vkmain(int argc, char** argv)
         }
     }
 
-
-    memset(&vk_vbuf_createinfo, 0, sizeof(vk_vbuf_createinfo));
-    vk_vbuf_createinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vk_vbuf_createinfo.size = sizeof(vertices);
-    vk_vbuf_createinfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vk_vbuf_createinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if(vkCreateBuffer(vk_dev, &vk_vbuf_createinfo, NULL, &vk_vbuf) != VK_SUCCESS)
+    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vk_vbuf, &vk_vbuf_mem))
     {
-        perror("vkCreateBuffer");
         return 1;
     }
 
-    vkGetBufferMemoryRequirements(vk_dev, vk_vbuf, &vk_memreq);
-    memset(&vk_memallocinfo, 0, sizeof(vk_memallocinfo));
-    vk_memallocinfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vk_memallocinfo.allocationSize = vk_memreq.size;
-    vk_memallocinfo.memoryTypeIndex = findmem(vk_phydevs[usephydev], vk_memreq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    
-    if(vkAllocateMemory(vk_dev, &vk_memallocinfo, NULL, &vk_vbuf_mem) != VK_SUCCESS)
-    {
-        perror("vkAllocateMemory");
-        return 1;
-    }
-
-    vkBindBufferMemory(vk_dev, vk_vbuf, vk_vbuf_mem, 0);
-    if(vkMapMemory(vk_dev, vk_vbuf_mem, 0, vk_vbuf_createinfo.size, 0, &mem) != VK_SUCCESS)
+    if(vkMapMemory(vk_dev, vk_vbuf_mem, 0, sizeof(vertices), 0, &mem) != VK_SUCCESS)
     {
         perror("vkMapMemory");
         return 1;
     }
-    memcpy(mem, vertices, vk_vbuf_createinfo.size);
+    memcpy(mem, vertices, sizeof(vertices));
     vkUnmapMemory(vk_dev, vk_vbuf_mem);
 
     memset(&vk_cmdpool_createinfo, 0, sizeof(VkCommandPoolCreateInfo));
@@ -849,7 +863,6 @@ int vkmain(int argc, char** argv)
     vk_clear.color.float32[1] = 0.5f;
     vk_clear.color.float32[2] = 0.3f;
     vk_clear.color.float32[3] = 1.0f;
-
     /* offset is 0 */
     vk_renderpass_begininfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     vk_renderpass_begininfo.renderPass = vk_renderpass;
@@ -976,4 +989,5 @@ int vkmain(int argc, char** argv)
 int main(int argc, char** argv)
 {
     vkmain(argc, argv);
+    return 0;
 }
