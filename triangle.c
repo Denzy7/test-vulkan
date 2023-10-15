@@ -208,11 +208,6 @@ int vkmain(int argc, char** argv)
     VkPipelineMultisampleStateCreateInfo vk_pipeline_msaa_createinfo;
     VkPipelineColorBlendAttachmentState vk_pipeline_colorblend_attachmentstate;
     VkPipelineColorBlendStateCreateInfo vk_pipeline_colorblend_createinfo;
-    VkPipelineDynamicStateCreateInfo vk_pipeline_dynamicstate_createinfo;
-    VkDynamicState vk_pipeline_dynamicstate[] =
-    {
-        VK_DYNAMIC_STATE_VIEWPORT
-    };
     VkRenderPass vk_renderpass;
     VkRenderPassCreateInfo vk_renderpass_createinfo;
     VkPipelineLayout vk_pipeline_layout;
@@ -701,11 +696,6 @@ int vkmain(int argc, char** argv)
     vk_pipeline_colorblend_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     vk_pipeline_colorblend_createinfo.attachmentCount = 1;
     vk_pipeline_colorblend_createinfo.pAttachments = &vk_pipeline_colorblend_attachmentstate;
-
-    memset(&vk_pipeline_dynamicstate_createinfo, 0, sizeof(VkPipelineDynamicStateCreateInfo));
-    vk_pipeline_dynamicstate_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    vk_pipeline_dynamicstate_createinfo.dynamicStateCount = arysz(vk_pipeline_dynamicstate);
-    vk_pipeline_dynamicstate_createinfo.pDynamicStates = vk_pipeline_dynamicstate;
 
     memset(&vk_pipeline_layout_createinfo, 0, sizeof(VkPipelineLayoutCreateInfo));
     vk_pipeline_layout_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
