@@ -606,7 +606,11 @@ int vkmain(int argc, char** argv)
 
     vk_shadermod_createinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 
-    spv_load("vert.spv", &spv);
+    if(!spv_load("vert.spv", &spv))
+    {
+        perror("cannot load vert.spv, check its next to the executable if not android");
+        return 1;
+    }
     vk_shadermod_createinfo.codeSize = spv.sz;
     vk_shadermod_createinfo.pCode = spv.code;
     if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_vert) != VK_SUCCESS)
@@ -616,7 +620,11 @@ int vkmain(int argc, char** argv)
     }
     spv_free(&spv);
 
-    spv_load("frag.spv", &spv);
+    if(!spv_load("frag.spv", &spv))
+    {
+        perror("cannot load frag.spv, check its next to the executable if not android");
+        return 1;
+    }
     vk_shadermod_createinfo.codeSize = spv.sz;
     vk_shadermod_createinfo.pCode = spv.code;
     if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_frag) != VK_SUCCESS)

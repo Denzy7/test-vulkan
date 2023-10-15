@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(test_vulkan LANGUAGES C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 find_package(X11)
-find_package(Vulkan)
+find_package(Vulkan REQUIRED)
 set(window_src) 
 set(window_libs ${Vulkan_LIBRARIES})
 set(window_include)
@@ -36,3 +36,27 @@ foreach(exe ${exes})
             -Wall -Werror -pedantic)
     endif()
 endforeach()
+
+set(glslc_src
+    vert.glsl.vert
+    frag.glsl.frag)
+
+if(Vulkan_GLSLC_EXECUTABLE)
+    foreach(src ${glslc_src})
+        set(insrc ${test_vulkan_SOURCE_DIR}/${src})
+        get_filename_component(bare ${src} NAME_WE)
+        set(outsrc ${CMAKE_CURRENT_BINARY_DIR}/${bare}.spv)    
+        add_custom_command(
+            OUTPUT ${outsrc}
+            COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${insrc} -o ${outsrc}
+            DEPENDS ${insrc} 
+            VERBATIM
+            )
+        list(APPEND spirv ${outsrc})
+    endforeach()
+    add_custom_target(shaders 
+        DEPENDS ${spirv})
+    add_dependencies(triangle shaders)
+else()
+    message(WARNING "glslc not found. make sure you compiled the shader sources manually into the run directory")
+endif()
