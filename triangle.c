@@ -110,6 +110,48 @@ int mkbuffer(VkPhysicalDevice phydev, VkDevice dev, VkDeviceSize size, VkBufferU
     return 1;
 }
 
+int bufcpy(VkDevice dev, VkCommandPool pool, VkQueue queue, VkBuffer src, VkBuffer dst, VkDeviceSize size)
+{
+    VkCommandBufferAllocateInfo allocinfo;
+    VkCommandBuffer cmdbuf;
+    VkCommandBufferBeginInfo begininfo;
+    VkBufferCopy copyregioninfo;
+    VkSubmitInfo submitinfo;
+
+    memset(&allocinfo, 0, sizeof(allocinfo));
+    allocinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocinfo.commandPool = pool;
+    allocinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocinfo.commandBufferCount = 1;
+
+    if(vkAllocateCommandBuffers(dev, &allocinfo, &cmdbuf) != VK_SUCCESS)
+    {
+        perror("vkAllocateCommandBuffers failed");
+        return 0;
+    }
+
+    begininfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begininfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdbuf, &begininfo);
+    memset(&copyregioninfo, 0, sizeof(copyregioninfo));
+    /* offsets are 0 */
+    copyregioninfo.size = size;
+    vkCmdCopyBuffer(cmdbuf, src, dst, 1, &copyregioninfo);
+    vkEndCommandBuffer(cmdbuf);
+
+    memset(&submitinfo, 0, sizeof(submitinfo));
+    submitinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitinfo.commandBufferCount = 1;
+    submitinfo.pCommandBuffers = &cmdbuf;
+
+    vkQueueSubmit(queue, 1, &submitinfo, VK_NULL_HANDLE);
+    vkDeviceWaitIdle(dev);
+
+    vkFreeCommandBuffers(dev, pool, 1, &cmdbuf);
+
+    return 1;
+}
+
 int vkmain(int argc, char** argv)
 {
     /* common */
@@ -221,9 +263,13 @@ int vkmain(int argc, char** argv)
     VkFramebuffer* vk_fbuf;
     VkCommandPoolCreateInfo vk_cmdpool_createinfo;
     VkCommandPool vk_cmdpool;
+
+    VkBuffer vk_buf_staging;
+    VkDeviceMemory vk_buf_staging_mem;
     VkBuffer vk_vbuf;
     VkDeviceMemory vk_vbuf_mem;
     VkDeviceSize vk_vbuf_off[] = {0};
+
     VkCommandBufferAllocateInfo vk_cmdbuf_allocinfo;
     VkCommandBuffer* vk_cmdbuf;
     VkCommandBufferBeginInfo vk_cmdbuf_begininfo;
@@ -410,7 +456,12 @@ int vkmain(int argc, char** argv)
     {
         vkGetPhysicalDeviceProperties(vk_phydevs[i], &vk_phydevs_props[i]);
         vkGetPhysicalDeviceFeatures(vk_phydevs[i], &vk_phydevs_feats[i]);
-        printf("dev:%s ver:%u type:%d\n", vk_phydevs_props[i].deviceName, vk_phydevs_props[i].apiVersion, vk_phydevs_props[i].deviceType);
+        printf("dev:%s ver:v%u.%u.%u type:%d\n", 
+                vk_phydevs_props[i].deviceName, 
+                VK_API_VERSION_MAJOR(vk_phydevs_props[i].apiVersion), 
+                VK_API_VERSION_MINOR(vk_phydevs_props[i].apiVersion), 
+                VK_API_VERSION_PATCH(vk_phydevs_props[i].apiVersion), 
+                vk_phydevs_props[i].deviceType);
         if(vk_phydevs_props[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             usephydev = i;
     }
@@ -794,18 +845,29 @@ int vkmain(int argc, char** argv)
         }
     }
 
-    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vk_vbuf, &vk_vbuf_mem))
+    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), 
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                &vk_buf_staging, &vk_buf_staging_mem))
     {
         return 1;
     }
 
-    if(vkMapMemory(vk_dev, vk_vbuf_mem, 0, sizeof(vertices), 0, &mem) != VK_SUCCESS)
+    if(vkMapMemory(vk_dev, vk_buf_staging_mem, 0, sizeof(vertices), 0, &mem) != VK_SUCCESS)
     {
         perror("vkMapMemory");
         return 1;
     }
     memcpy(mem, vertices, sizeof(vertices));
-    vkUnmapMemory(vk_dev, vk_vbuf_mem);
+    vkUnmapMemory(vk_dev, vk_buf_staging_mem);
+
+    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), 
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                &vk_vbuf, &vk_vbuf_mem))
+    {
+        return 1;
+    }
 
     memset(&vk_cmdpool_createinfo, 0, sizeof(VkCommandPoolCreateInfo));
     vk_cmdpool_createinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -817,6 +879,7 @@ int vkmain(int argc, char** argv)
         perror("vkCreateCommandPool");
         return 1;
     }   
+
     vk_cmdbuf = malloc(sizeof(VkCommandBuffer) * vk_buffered_frames);
 
     memset(&vk_cmdbuf_allocinfo, 0, sizeof(VkCommandBufferAllocateInfo));
@@ -883,6 +946,12 @@ int vkmain(int argc, char** argv)
         
     vkGetDeviceQueue(vk_dev, q_gfx_idx, 0, &q_gfx);
 
+    if(bufcpy(vk_dev, vk_cmdpool, q_gfx, vk_buf_staging, vk_vbuf, sizeof(vertices)) == 0)
+    {
+        perror("bufcpy failed");
+        return 1;
+    }
+
     while(vkwindow.RUNNING)
     {
         window_poll(&vkwindow);
@@ -931,6 +1000,8 @@ int vkmain(int argc, char** argv)
 
     vkDeviceWaitIdle(vk_dev);
 
+    vkDestroyBuffer(vk_dev, vk_buf_staging, NULL);
+    vkFreeMemory(vk_dev, vk_buf_staging_mem, NULL);
     vkDestroyBuffer(vk_dev, vk_vbuf, NULL);
     vkFreeMemory(vk_dev, vk_vbuf_mem, NULL);
     for(i = 0; i < vk_buffered_frames; i++)
