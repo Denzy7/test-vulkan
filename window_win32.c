@@ -11,7 +11,6 @@ WNDCLASSW wc;
 static const wchar_t* wc_class = L"WINDOW_WIN32";
 static const char* exts[] =
 {
-    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
     VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
     VK_KHR_SURFACE_EXTENSION_NAME
 };
@@ -72,23 +71,22 @@ const char** window_extensions_get(uint32_t* extension_count)
 
 int window_create(struct window* window)
 {
-    struct winapi* winapi;
+    struct winapi winapi;
     wchar_t* wcs;
     size_t wcs_len = 0;
 
-    winapi = malloc(sizeof(struct winapi));
+    if(window->title != NULL)   
+        wcs_len = mbstowcs(NULL, NULL, 0);
 
-    wcs_len = mbstowcs(NULL, window->title, 0);
     wcs = calloc(wcs_len + 1, sizeof(wchar_t));
 
-    if(mbstowcs(wcs, window->title, wcs_len + 1) == -1)
+    if(mbstowcs(wcs, window->title, wcs_len + 1) == sizeof(size_t) - 1)
     {
         perror("mbstowcs");
-        return 1;
+        return 0;
     }
 
-    window->__winapi = winapi;
-    winapi->hwnd = CreateWindowExW(
+    winapi.hwnd = CreateWindowExW(
             0, 
             wc.lpszClassName,
             wcs, 
@@ -99,15 +97,17 @@ int window_create(struct window* window)
             NULL, 
             wc.hInstance,
             NULL);
-    if(winapi->hwnd == NULL)
+    if(winapi.hwnd == NULL)
     {
-        perror("CreatWindowExW");
+        perror("CreateWindowExW");
         return 0;
     }
-    ShowWindow(winapi->hwnd, SW_NORMAL);
-    UpdateWindow(winapi->hwnd);
-    SetWindowLongPtr(winapi->hwnd, GWLP_USERDATA, (LONG_PTR)window);
+    ShowWindow(winapi.hwnd, SW_NORMAL);
+    UpdateWindow(winapi.hwnd);
+    SetWindowLongPtr(winapi.hwnd, GWLP_USERDATA, (LONG_PTR)window);
     window->RUNNING = 1;
+    window->__winapi = malloc(sizeof(struct winapi));
+    memcpy(window->__winapi, &winapi, sizeof(struct winapi));
 
     return 1;
 
@@ -116,7 +116,7 @@ int window_poll(struct window* window)
 {
     struct winapi* winapi = window->__winapi;
 
-    GetMessageW(&winapi->msg, winapi->hwnd, 0, 0);
+    PeekMessageW(&winapi->msg, winapi->hwnd, 0, 0, PM_REMOVE);
     DispatchMessageW(&winapi->msg);
     return 1;
 }
@@ -132,6 +132,7 @@ int window_vk(const VkInstance instance, VkSurfaceKHR* surface, struct window* w
     struct winapi* winapi = window->__winapi;
 
     VkWin32SurfaceCreateInfoKHR createinfo;
+
     memset(&createinfo, 0, sizeof(VkWin32SurfaceCreateInfoKHR));
     createinfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     createinfo.hwnd = winapi->hwnd;

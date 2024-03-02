@@ -20,8 +20,8 @@ struct window
 #ifdef _cplusplus
 extern "C" {
 #endif
-int window_init();
-void window_terminate();
+int window_init(void);
+void window_terminate(void);
 const char** window_extensions_get(uint32_t* extension_count); 
 
 int window_create(struct window* window);

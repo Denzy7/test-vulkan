@@ -19,10 +19,6 @@ struct winapi
 
 static const char* exts[] =
 {
-    /*VK_EXT_DEBUG_UTILS_EXTENSION_NAME,*/ 
-    /* usually unavailable on droid unless validation 
-     * layers are in the jniLibs*/ 
-
     VK_KHR_SURFACE_EXTENSION_NAME,
     VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
 };

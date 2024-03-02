@@ -78,6 +78,7 @@ void android_main(struct android_app* app)
          * https://developer.android.com/ndk/guides/graphics/validation-layer
          *
          * also enable VK_EXT_debug_utils in window_andk.c
+         *  NOTE: vkapp already enables this
          * */
 
         "-bufferframes",

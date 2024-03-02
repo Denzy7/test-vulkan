@@ -1,31 +1,41 @@
 cmake_minimum_required(VERSION 3.10)
 project(test_vulkan LANGUAGES C)
-set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 find_package(X11)
 find_package(Vulkan REQUIRED)
 set(window_src) 
 set(window_libs ${Vulkan_LIBRARIES})
 set(window_include)
+set(spv_src)
+set(extra_link)
+
 if(X11_FOUND)
     message("using x11")
     list(APPEND window_src window_x11.c)
+    list(APPEND spv_src spv_stdio.c)
     list(APPEND window_libs ${X11_LIBRARIES})
     list(APPEND window_include ${X11_INCLUDE_DIR})
+    list(APPEND extra_link m)
 elseif(WIN32)
     message("using win32")
+    list(APPEND spv_src spv_stdio.c)
     list(APPEND window_src window_win32.c)
 endif()
 
-#spv loader
-list(APPEND window_src spv_stdio.c)
+add_library(spv ${spv_src})
+add_library(window ${window_src})
+target_link_libraries(window PRIVATE ${window_libs} )
+add_library(vkapp vkapp.c vkapp.h)
+target_link_libraries(vkapp PRIVATE ${Vulkan_LIBRARIES} window)
 
 set(exes 
     triangle 
+    init
+    clear
     test_windowbasic)
 
 foreach(exe ${exes})
-    add_executable(${exe} ${exe}.c ${window_src})
-    target_link_libraries(${exe} ${window_libs})
+    add_executable(${exe} ${exe}.c)
+    target_link_libraries(${exe} ${window_libs} vkapp window spv ${extra_link})
     target_include_directories(${exe} PRIVATE ${window_include})
     set_target_properties(
         ${exe} PROPERTIES
@@ -33,7 +43,7 @@ foreach(exe ${exes})
     if(NOT MSVC)
         target_compile_options(
             ${exe} PRIVATE
-            -Wall -Werror -pedantic)
+            -Wall -Wextra -pedantic)
     endif()
 endforeach()
 

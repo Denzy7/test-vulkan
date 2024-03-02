@@ -12,6 +12,7 @@ set(testvkpath "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 # now build app's shared lib
 add_library(GFX SHARED
     ${testvkpath}/triangle.c
+    ${testvkpath}/vkapp.c
     spv_andk.c
 	main.c
     window_andk.c

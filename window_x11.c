@@ -15,7 +15,6 @@ XEvent ev;
 
 static const char* neededexts_inst_str[]=
 {
-    VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
     VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
     VK_KHR_SURFACE_EXTENSION_NAME
 };
@@ -34,7 +33,7 @@ int x11error(Display* _dpy, XErrorEvent* err)
 }
 
 
-int window_init()
+int window_init(void)
 {
     dpy = XOpenDisplay(NULL);
     if(dpy == NULL)
@@ -49,7 +48,7 @@ int window_init()
     return 1;
 }
 
-void window_terminate()
+void window_terminate(void)
 {
     XCloseDisplay(dpy);
 }

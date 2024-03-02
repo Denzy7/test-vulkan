@@ -1,24 +1,17 @@
+/* create a graphics pipeline object and render 
+ * triangle 
+ */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <vulkan/vulkan_core.h>
 
 #define WINDOW_VK
 #include "window.h"
+#include "vkapp.h"
 #include "spv.h"
 
-PFN_vkCreateDebugUtilsMessengerEXT create_dbg_util_msgr = NULL;
-PFN_vkDestroyDebugUtilsMessengerEXT destroy_dbg_util_msgr = NULL;
-
-#define arysz(ary) sizeof(ary)/sizeof(ary[0])
-
-struct needed_ext_or_layer
-{
-    const char* ext_or_layer;
-    int has;
-};
 
 struct vertex
 {
@@ -26,188 +19,17 @@ struct vertex
     float aColour[3];
 };
 
-static const char* neededexts_dev_str[] =
-{
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
-
-
-static const char* neededlayers_str[] =
-{
-    "VK_LAYER_KHRONOS_validation",
-    /*"VK_LAYER_MANGOHUD_overlay_x86_64"*/
-    /*"VK_LAYER_LUNARG_api_dump"*/
-};
-
-
-static struct needed_ext_or_layer neededexts_dev[arysz(neededexts_dev_str)];
-static struct needed_ext_or_layer* neededexts_inst;
-static struct needed_ext_or_layer neededlayers [arysz(neededlayers_str)];
-
-static VKAPI_ATTR VkBool32 VKAPI_CALL debugcallback(VkDebugUtilsMessageSeverityFlagsEXT severity, VkDebugUtilsMessageTypeFlagsEXT type, const VkDebugUtilsMessengerCallbackDataEXT* cbdata, void* userdata )
-{
-    if(severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-    {
-        printf("\ndebugcb:> error: %s\n", cbdata->pMessage);
-        exit(1);
-    }
-    return VK_FALSE;
-}
-
-uint32_t findmem(VkPhysicalDevice phydev, uint32_t type, VkMemoryPropertyFlags flag)
-{
-    uint32_t i;
-    VkPhysicalDeviceMemoryProperties vk_phydev_memprops;
-    vkGetPhysicalDeviceMemoryProperties(phydev, &vk_phydev_memprops);
-for(i = 0; i < vk_phydev_memprops.memoryTypeCount; i++)
-    {
-        if((type & (1 << i) &&
-            (vk_phydev_memprops.memoryTypes[i].propertyFlags & flag) == flag)) 
-        {
-            return i;
-        }
-    }
-
-    return 0;
-}
-
-int mkbuffer(VkPhysicalDevice phydev, VkDevice dev, VkDeviceSize size, VkBufferUsageFlags usage,
-        VkMemoryPropertyFlags props, VkBuffer* buffer,
-        VkDeviceMemory* memory)
-{
-    VkBufferCreateInfo createinfo;
-    VkMemoryRequirements require;
-    VkMemoryAllocateInfo allocinfo;
-
-    memset(&createinfo, 0, sizeof(createinfo));
-    createinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    createinfo.size = size;
-    createinfo.usage = usage;
-    createinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if(vkCreateBuffer(dev, &createinfo, NULL, buffer) 
-            != VK_SUCCESS)
-    {
-        perror("vkCreateBuffer");
-        return 0;
-    }
-
-    memset(&require, 0, sizeof(require));
-    vkGetBufferMemoryRequirements(dev, *buffer, &require);
-    memset(&allocinfo, 0, sizeof(allocinfo));
-    allocinfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocinfo.allocationSize = require.size;
-    allocinfo.memoryTypeIndex = findmem(phydev,require.memoryTypeBits, props);
-
-    if(vkAllocateMemory(dev, &allocinfo, NULL, memory) !=
-            VK_SUCCESS)
-    {
-        perror("vkAllocateMemory");
-        return 1;
-    }
-    
-    vkBindBufferMemory(dev, *buffer, *memory, 0);
-    return 1;
-}
-
-int bufcpy(VkDevice dev, VkCommandPool pool, VkQueue queue, VkBuffer src, VkBuffer dst, VkDeviceSize size)
-{
-    VkCommandBufferAllocateInfo allocinfo;
-    VkCommandBuffer cmdbuf;
-    VkCommandBufferBeginInfo begininfo;
-    VkBufferCopy copyregioninfo;
-    VkSubmitInfo submitinfo;
-
-    memset(&allocinfo, 0, sizeof(allocinfo));
-    allocinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocinfo.commandPool = pool;
-    allocinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocinfo.commandBufferCount = 1;
-
-    if(vkAllocateCommandBuffers(dev, &allocinfo, &cmdbuf) != VK_SUCCESS)
-    {
-        perror("vkAllocateCommandBuffers failed");
-        return 0;
-    }
-
-    begininfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begininfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdbuf, &begininfo);
-    memset(&copyregioninfo, 0, sizeof(copyregioninfo));
-    /* offsets are 0 */
-    copyregioninfo.size = size;
-    vkCmdCopyBuffer(cmdbuf, src, dst, 1, &copyregioninfo);
-    vkEndCommandBuffer(cmdbuf);
-
-    memset(&submitinfo, 0, sizeof(submitinfo));
-    submitinfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitinfo.commandBufferCount = 1;
-    submitinfo.pCommandBuffers = &cmdbuf;
-
-    vkQueueSubmit(queue, 1, &submitinfo, VK_NULL_HANDLE);
-    vkDeviceWaitIdle(dev);
-
-    vkFreeCommandBuffers(dev, pool, 1, &cmdbuf);
-
-    return 1;
-}
-
 int vkmain(int argc, char** argv)
 {
     /* common */
-    uint32_t i, j;
+    int32_t i;
     void* mem;
-    struct spv spv;
 
     struct window vkwindow;
-    int uselayers = 0;
-
-    VkApplicationInfo vk_appinfo;
-    VkInstanceCreateInfo vk_inst_createinfo;
-    VkDebugUtilsMessengerCreateInfoEXT vk_dbgmsg_createinfo;
-    VkDebugUtilsMessengerEXT vk_dbgmsg;
-    uint32_t ext_count_inst, layer_count = 0;
-    uint32_t ext_needed_inst;
-    const char** neededexts_inst_str; 
-    VkExtensionProperties* vk_extprops_inst;
-    VkLayerProperties* vk_layerprops = NULL;
-
+    struct vkapp vkapp;
+    struct spv spv;
+    
     VkResult vkres;
-    VkInstance vk_inst;
-
-    uint32_t count_devs;
-    VkPhysicalDevice* vk_phydevs;
-    VkPhysicalDeviceProperties* vk_phydevs_props;
-    VkPhysicalDeviceFeatures* vk_phydevs_feats;
-    int usephydev = -1;
-
-    uint32_t qcount;
-    VkQueueFamilyProperties* vk_q_props;
-    int q_gfx_idx = -1;
-    VkQueue q_gfx;
-    VkDeviceQueueCreateInfo q_createinfo;
-    float q_gfx_priority = 1.0;
-    VkBool32 q_present_support;
-
-    VkDeviceCreateInfo vk_dev_createinfo;
-    VkSurfaceKHR vk_sfc;
-    uint32_t vk_sfc_format_count;
-    VkSurfaceFormatKHR* vk_sfc_formats;
-    int vk_sfc_ok = 0;
-    VkSurfaceCapabilitiesKHR vk_sfc_caps;
-    uint32_t vk_sfc_presentmode_count;
-    int vk_sfc_presentmode_ok = -1;
-    VkPresentModeKHR* vk_sfc_presentmodes;
-    VkDevice vk_dev;
-    uint32_t ext_count_dev;
-    VkExtensionProperties* vk_extprops_dev;
-
-    VkSwapchainCreateInfoKHR vk_swapchain_createinfo;
-    VkSwapchainKHR vk_swapchain;
-    VkImage* vk_swapchain_imgs;
-    VkImageView* vk_swapchain_imgs_views;
-    uint32_t vk_swapchain_imgs_count;
-    VkImageViewCreateInfo vk_swapchain_imgs_views_createinfo;
 
     VkShaderModuleCreateInfo vk_shadermod_createinfo;
     VkShaderModule vk_shader_vert;
@@ -250,17 +72,11 @@ int vkmain(int argc, char** argv)
     VkPipelineMultisampleStateCreateInfo vk_pipeline_msaa_createinfo;
     VkPipelineColorBlendAttachmentState vk_pipeline_colorblend_attachmentstate;
     VkPipelineColorBlendStateCreateInfo vk_pipeline_colorblend_createinfo;
-    VkRenderPass vk_renderpass;
-    VkRenderPassCreateInfo vk_renderpass_createinfo;
     VkPipelineLayout vk_pipeline_layout;
     VkPipelineLayoutCreateInfo vk_pipeline_layout_createinfo;
-    VkAttachmentDescription vk_colorattach;
-    VkAttachmentReference vk_colorattach_ref;
-    VkSubpassDescription vk_colorattach_subpass;
     VkGraphicsPipelineCreateInfo vk_pipeline_createinfo;
     VkPipeline vk_pipeline;
-    VkFramebufferCreateInfo vk_fbuf_createinfo;
-    VkFramebuffer* vk_fbuf;
+
     VkCommandPoolCreateInfo vk_cmdpool_createinfo;
     VkCommandPool vk_cmdpool;
 
@@ -285,366 +101,42 @@ int vkmain(int argc, char** argv)
     {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
-    VkSubpassDependency vk_subpass_deps;
 
     uint32_t vk_swapchain_imgidx;
     VkClearValue vk_clear;
     VkPresentInfoKHR vk_presentinfo;
     int vk_buffered_frames = 3, vk_current_frame = 0;
 
+    memset(&vkwindow, 0, sizeof(struct window));
+    memset(&vkapp, 0, sizeof(struct vkapp));
+
     for(i = 0; i < argc; i++)
     {
         printf("v: %s\n", argv[i]);
         if(!strcmp(argv[i], "-uselayers"))
-            uselayers = 1;
+            vkapp.uselayers = 1;
         if(!strcmp(argv[i], "-bufferframes")
                 && argv[i + 1] != NULL)
-            sscanf(argv[i + 1], "%d", &vk_buffered_frames);
+            sscanf(argv[i + 1], "%d", &vkapp.bufferedframes);
     }
 
-    if(!window_init())
-        return 1;
-
-    /* fill needed exts and layers */
-    memset(neededexts_dev, 0, sizeof(neededexts_dev));
-    for(i = 0; i < arysz(neededexts_dev); i++)
-    {
-        neededexts_dev[i].ext_or_layer = neededexts_dev_str[i];
-    }
-    neededexts_inst_str = window_extensions_get(&ext_needed_inst);
-    neededexts_inst = malloc(ext_needed_inst * sizeof(struct needed_ext_or_layer));
-    for(i = 0; i < ext_needed_inst; i++)
-    {
-        neededexts_inst[i].ext_or_layer = neededexts_inst_str[i];
-    }
-    memset(neededlayers, 0, sizeof(neededlayers));
-    for(i = 0; i < arysz(neededlayers); i++)
-    {
-        neededlayers[i].ext_or_layer = neededlayers_str[i];
-    }
-
-    memset(&vk_appinfo, 0, sizeof(VkApplicationInfo));
-    memset(&vk_inst_createinfo, 0, sizeof(VkInstanceCreateInfo));
-    memset(&vk_dbgmsg_createinfo, 0, sizeof(VkDebugUtilsMessengerCreateInfoEXT));
-
-    vk_dbgmsg_createinfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    vk_dbgmsg_createinfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    vk_dbgmsg_createinfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-        | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    vk_dbgmsg_createinfo.pfnUserCallback = debugcallback;
-    
-    vk_appinfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    vk_appinfo.pApplicationName = "Hello Vulkan";
-    vk_appinfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
-    vk_appinfo.pEngineName = "None";
-    vk_appinfo.engineVersion = VK_MAKE_VERSION(0, 0, 1);
-    vk_appinfo.apiVersion = VK_API_VERSION_1_0 ;
-    
-    vkEnumerateInstanceExtensionProperties(NULL, &ext_count_inst, NULL);
-    if(ext_count_inst == 0)
-    {
-        perror("no instance extensions found. probably no vulkan in device!");
-        return 1;
-    }
-    vk_extprops_inst = malloc(ext_count_inst * sizeof(VkExtensionProperties));
-    vkEnumerateInstanceExtensionProperties(NULL, &ext_count_inst, vk_extprops_inst);
-    printf("\nexts_inst [%u]:\n", ext_count_inst );
-    for(i = 0; i < ext_count_inst; i++)
-    {
-        for(j = 0; j < ext_needed_inst; j++)
-        {
-            if(strcmp(neededexts_inst[j].ext_or_layer, vk_extprops_inst[i].extensionName) == 0)
-                neededexts_inst[j].has = 1;
-        }
-        printf("%s\n", vk_extprops_inst[i].extensionName);
-    }
-    for(i = 0; i < ext_needed_inst; i++)
-    {
-        if(!neededexts_inst[i].has)
-        {
-            fprintf(stderr, "missing needed instance extension: %s\n", neededexts_inst[i].ext_or_layer);
-            return 1;
-        }
-    }
-
-    vkEnumerateInstanceLayerProperties(&layer_count, NULL);
-    printf("\nlayers [%u]:\n", layer_count);
-    if(layer_count > 0)
-    {
-        vk_layerprops = malloc(sizeof(VkLayerProperties) * layer_count);
-        vkEnumerateInstanceLayerProperties(&layer_count, vk_layerprops);
-        for(i = 0; i < layer_count; i++)
-        {
-            for(j = 0; j < arysz(neededlayers); j++)
-            {
-
-                if(strcmp(vk_layerprops[i].layerName, neededlayers[j].ext_or_layer) == 0)
-                    neededlayers[j].has = 1;
-            }
-
-            printf("%s\n", vk_layerprops[i].layerName);
-        }
-    }
-
-    if(uselayers)
-    {
-        for(i = 0; i < arysz(neededlayers); i++)
-        {
-            if(!neededlayers[i].has){
-                printf("missing needed layer: %s\n", neededlayers[i].ext_or_layer);
-                /* are unfound layers a must???? */
-                return 1;
-            }
-        }
-    }
-
-    vk_inst_createinfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    vk_inst_createinfo.pApplicationInfo = &vk_appinfo;
-    vk_inst_createinfo.enabledExtensionCount = ext_needed_inst;
-    vk_inst_createinfo.ppEnabledExtensionNames = neededexts_inst_str;
-    if(uselayers)
-        vk_inst_createinfo.enabledLayerCount = arysz(neededlayers_str);
-    vk_inst_createinfo.ppEnabledLayerNames = neededlayers_str;
-    if(uselayers)
-        vk_inst_createinfo.pNext = &vk_dbgmsg_createinfo;
-
-    vkres = vkCreateInstance(&vk_inst_createinfo, NULL, &vk_inst);
-    if(vkres != VK_SUCCESS)
-    {
-        perror("vkCreateInstance");
-        return 1;
-    }
-    create_dbg_util_msgr = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(vk_inst, "vkCreateDebugUtilsMessengerEXT");
-    if(create_dbg_util_msgr == NULL)
-    {
-        perror("couldn't procaddr vkCreateDebugUtilsMessengerEXT");
-        return 1;
-    }
-    destroy_dbg_util_msgr = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(vk_inst, "vkDestroyDebugUtilsMessengerEXT");
-    if(destroy_dbg_util_msgr == NULL)
-    {
-        perror("couldn't procaddr vkDestroyDebugUtilsMessengerEXT");
-        return 1;
-    }
-
-    create_dbg_util_msgr(vk_inst, &vk_dbgmsg_createinfo, NULL, &vk_dbgmsg);
-    memset(&vkwindow, 0, sizeof(struct window));
+    vkwindow.title = "Vulkan Triangle";
     vkwindow.width = 854;
     vkwindow.height = 480;
-    if(window_create(&vkwindow) == 0 || window_vk(vk_inst, &vk_sfc, &vkwindow) == 0)
+
+    if(!window_init() || !window_create(&vkwindow))
+        return 1;
+
+    if(!vkapp_init(&vkapp) || !window_vk(vkapp.INSTANCE, &vkapp.surface, &vkwindow))
     {
-        perror("cannot create window or vk");
+        perror("cannot init vkapp or vkwindow");
         return 1;
     }
 
-    vkEnumeratePhysicalDevices(vk_inst, &count_devs, NULL);
-    if(count_devs == 0)
+    if(!vkapp_dewice(&vkapp) || !vkapp_swapchain(&vkapp))
     {
-        perror("vkEnumeratePhysicalDevices failed. device has no vulkan dewice");
+        fprintf(stderr, "cannot init device or swapchain\n");
         return 1;
-    }
-    vk_phydevs = malloc(count_devs * sizeof(VkPhysicalDevice));
-    vk_phydevs_props = malloc(count_devs * sizeof(VkPhysicalDeviceProperties));
-    vk_phydevs_feats = malloc(count_devs * sizeof(VkPhysicalDeviceFeatures));
-    vkEnumeratePhysicalDevices(vk_inst, &count_devs, vk_phydevs);
-
-    printf("\ndevs [%d]:\n", count_devs);
-    for(i = 0; i < count_devs; i++)
-    {
-        vkGetPhysicalDeviceProperties(vk_phydevs[i], &vk_phydevs_props[i]);
-        vkGetPhysicalDeviceFeatures(vk_phydevs[i], &vk_phydevs_feats[i]);
-        printf("dev:%s ver:v%u.%u.%u type:%d\n", 
-                vk_phydevs_props[i].deviceName, 
-                VK_API_VERSION_MAJOR(vk_phydevs_props[i].apiVersion), 
-                VK_API_VERSION_MINOR(vk_phydevs_props[i].apiVersion), 
-                VK_API_VERSION_PATCH(vk_phydevs_props[i].apiVersion), 
-                vk_phydevs_props[i].deviceType);
-        if(vk_phydevs_props[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            usephydev = i;
-    }
-
-    /*use igpu*/
-    if(usephydev == -1)
-        usephydev = 0;
-
-    vkGetPhysicalDeviceQueueFamilyProperties(vk_phydevs[usephydev], &qcount, NULL);
-    vk_q_props = malloc(sizeof(VkQueueFamilyProperties) * qcount);
-    vkGetPhysicalDeviceQueueFamilyProperties(vk_phydevs[usephydev], &qcount, vk_q_props);
-    for(i = 0; i < qcount; i++)
-    {
-        vkGetPhysicalDeviceSurfaceSupportKHR(vk_phydevs[usephydev], i, vk_sfc, &q_present_support);
-        if(vk_q_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && q_present_support)
-        {
-            q_gfx_idx = i;
-            break;
-        }
-    }
-    if(q_gfx_idx == -1)
-    {
-        perror("no queue w/ gfx bit and present support");
-        return 1;
-    }
-
-    vkEnumerateDeviceExtensionProperties(vk_phydevs[usephydev], NULL, &ext_count_dev, NULL);
-    if(ext_count_dev == 0)
-    {
-        perror("dewice has no extensions");
-        return 1;
-    }
-    vk_extprops_dev = malloc(sizeof(VkExtensionProperties) * ext_count_dev);
-    vkEnumerateDeviceExtensionProperties(vk_phydevs[usephydev], NULL, &ext_count_dev, vk_extprops_dev);
-    printf("\nexts_dev[%u]:\n", ext_count_dev);
-    for(i = 0; i < ext_count_dev; i++)
-    {
-        for(j = 0; j < arysz(neededexts_dev); j++)
-        {
-            if(strcmp( vk_extprops_dev[i].extensionName, neededexts_dev[j].ext_or_layer) == 0)
-                neededexts_dev[j].has = 1;
-        }
-        printf("%s\n",vk_extprops_dev[i].extensionName);
-    }
-    for(i = 0; i < arysz(neededexts_dev); i++)
-    {
-        if(!neededexts_dev[i].has)
-        {
-            fprintf(stderr, "missing needed device extension: %s\n", neededexts_dev[i].ext_or_layer);
-            return 1;
-        }
-    }
-
-    memset(&q_createinfo, 0, sizeof(VkDeviceQueueCreateInfo));
-    q_createinfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    q_createinfo.queueFamilyIndex = q_gfx_idx;
-    q_createinfo.queueCount = 1;
-    q_createinfo.pQueuePriorities = &q_gfx_priority;
-
-    memset(&vk_dev_createinfo, 0, sizeof(VkDeviceCreateInfo));
-    vk_dev_createinfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    vk_dev_createinfo.pQueueCreateInfos = &q_createinfo;
-    vk_dev_createinfo.queueCreateInfoCount = 1;
-    vk_dev_createinfo.pEnabledFeatures = &vk_phydevs_feats[usephydev];
-    vk_dev_createinfo.ppEnabledLayerNames = vk_inst_createinfo.ppEnabledLayerNames;
-    vk_dev_createinfo.enabledExtensionCount = arysz(neededexts_dev_str);
-    vk_dev_createinfo.ppEnabledExtensionNames = neededexts_dev_str; 
-    vk_dev_createinfo.enabledLayerCount = vk_inst_createinfo.enabledLayerCount;
-    
-    vkres = vkCreateDevice(vk_phydevs[usephydev], &vk_dev_createinfo, NULL, &vk_dev);
-    if(vkres != VK_SUCCESS)
-    {
-        perror("vkCreateDevice");
-        return 1;
-    }
-
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk_phydevs[usephydev], vk_sfc, &vk_sfc_caps);
-
-    vkGetPhysicalDeviceSurfaceFormatsKHR(vk_phydevs[usephydev], vk_sfc, &vk_sfc_format_count, NULL);
-    if(vk_sfc_format_count == 0)
-    {
-        perror("vkGetPhysicalDeviceSurfaceFormatsKHR. none found");
-        return 1;
-    }
-    vk_sfc_formats = malloc(sizeof(VkSurfaceFormatKHR) * vk_sfc_format_count);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(vk_phydevs[usephydev], vk_sfc, &vk_sfc_format_count, vk_sfc_formats);
-    for(i = 0; i < vk_sfc_format_count; i++)
-    {
-        if(vk_sfc_formats[i].format == VK_FORMAT_B8G8R8_SRGB &&
-                vk_sfc_formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-        {
-            vk_sfc_ok = i;
-            break;
-        }
-    }
-    if(vk_sfc_ok == 0)
-    {
-        printf("no suitable(bgr8888 and linear) surface found, using 0\n");
-    }
-
-    vkGetPhysicalDeviceSurfacePresentModesKHR(vk_phydevs[usephydev], vk_sfc, &vk_sfc_presentmode_count, NULL);
-    if(vk_sfc_presentmode_count == 0)
-    {
-        perror("vkGetPhysicalDeviceSurfacePresentModesKHR. none found");
-        return 1;
-    }
-    vk_sfc_presentmodes = malloc(sizeof(VkPresentModeKHR) * vk_sfc_presentmode_count);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(vk_phydevs[usephydev], vk_sfc, &vk_sfc_presentmode_count, vk_sfc_presentmodes);
-    for(i = 0; i < vk_sfc_presentmode_count; i++)
-    {
-        if(vk_sfc_presentmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
-        {
-            vk_sfc_presentmode_ok = i;
-            break;
-        }
-    }
-    /*use vsync*/
-    if(vk_sfc_presentmode_ok == -1)
-        vk_sfc_presentmode_ok = VK_PRESENT_MODE_FIFO_KHR;
-
-    memset(&vk_swapchain_createinfo, 0, sizeof(VkSwapchainCreateInfoKHR));
-    vk_swapchain_createinfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    vk_swapchain_createinfo.surface = vk_sfc;
-    vk_swapchain_createinfo.minImageCount = vk_sfc_caps.minImageCount + 1;
-    vk_swapchain_createinfo.imageFormat = vk_sfc_formats[vk_sfc_ok].format;
-    vk_swapchain_createinfo.imageColorSpace = vk_sfc_formats[vk_sfc_ok].colorSpace;
-    vk_swapchain_createinfo.imageExtent = vk_sfc_caps.currentExtent;
-    vk_swapchain_createinfo.imageArrayLayers = 1;
-    vk_swapchain_createinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    vk_swapchain_createinfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vk_swapchain_createinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    for(i = 0; i < VK_COMPOSITE_ALPHA_FLAG_BITS_MAX_ENUM_KHR; i++)
-    {
-        if(vk_sfc_caps.supportedCompositeAlpha & (1 << i))
-        {
-            vk_swapchain_createinfo.compositeAlpha = (1 << i);
-            break;
-        }
-    }
-    if(vk_swapchain_createinfo.compositeAlpha == 0)
-    {
-        fprintf(stderr, "cannot find compatible composite alpha\n");
-        return 1;
-    }
-    vk_swapchain_createinfo.presentMode = vk_sfc_presentmodes[vk_sfc_presentmode_ok];
-    vk_swapchain_createinfo.clipped = VK_TRUE;
-    vk_swapchain_createinfo.oldSwapchain = VK_NULL_HANDLE;
-
-    if(vkCreateSwapchainKHR(vk_dev, &vk_swapchain_createinfo, NULL, &vk_swapchain) != VK_SUCCESS)
-    {
-        perror("vkCreateSwapchain");
-        return 1;
-    }
-
-    vkGetSwapchainImagesKHR(vk_dev, vk_swapchain, &vk_swapchain_imgs_count, NULL);
-    vk_swapchain_imgs = malloc(vk_swapchain_imgs_count * sizeof(VkImage));
-    vkGetSwapchainImagesKHR(vk_dev, vk_swapchain, &vk_swapchain_imgs_count, vk_swapchain_imgs);
-    vk_swapchain_imgs_views = malloc(vk_swapchain_imgs_count * sizeof(VkImageView));
-
-    memset(&vk_swapchain_imgs_views_createinfo, 0, sizeof(VkImageViewCreateInfo));
-    vk_swapchain_imgs_views_createinfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vk_swapchain_imgs_views_createinfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vk_swapchain_imgs_views_createinfo.format = vk_sfc_formats[vk_sfc_ok].format;
-    vk_swapchain_imgs_views_createinfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    vk_swapchain_imgs_views_createinfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    vk_swapchain_imgs_views_createinfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    vk_swapchain_imgs_views_createinfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    vk_swapchain_imgs_views_createinfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    vk_swapchain_imgs_views_createinfo.subresourceRange.baseMipLevel = 0;
-    vk_swapchain_imgs_views_createinfo.subresourceRange.levelCount = 1;
-    vk_swapchain_imgs_views_createinfo.subresourceRange.baseArrayLayer = 0;
-    vk_swapchain_imgs_views_createinfo.subresourceRange.layerCount = 1;
-
-    for(i = 0; i < vk_swapchain_imgs_count; i++)
-    {
-        vk_swapchain_imgs_views_createinfo.image = vk_swapchain_imgs[i];
-        if(vkCreateImageView(vk_dev, &vk_swapchain_imgs_views_createinfo, NULL, &vk_swapchain_imgs_views[i]) != 
-                VK_SUCCESS)
-        {
-            perror("vkCreateImageView");
-            return 1;
-        }
-
     }
 
     memset(&vk_shadermod_createinfo, 0, sizeof(VkShaderModuleCreateInfo));
@@ -659,7 +151,7 @@ int vkmain(int argc, char** argv)
     }
     vk_shadermod_createinfo.codeSize = spv.sz;
     vk_shadermod_createinfo.pCode = spv.code;
-    if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_vert) != VK_SUCCESS)
+    if(vkCreateShaderModule(vkapp.DEV, &vk_shadermod_createinfo, NULL, &vk_shader_vert) != VK_SUCCESS)
     {
         perror("cant create vert shader");
         return 1;
@@ -673,7 +165,7 @@ int vkmain(int argc, char** argv)
     }
     vk_shadermod_createinfo.codeSize = spv.sz;
     vk_shadermod_createinfo.pCode = spv.code;
-    if(vkCreateShaderModule(vk_dev, &vk_shadermod_createinfo, NULL, &vk_shader_frag) != VK_SUCCESS)
+    if(vkCreateShaderModule(vkapp.DEV, &vk_shadermod_createinfo, NULL, &vk_shader_frag) != VK_SUCCESS)
     {
         perror("cant create frag shader");
         return 1;
@@ -713,13 +205,13 @@ int vkmain(int argc, char** argv)
 
     memset(&vk_viewport, 0, sizeof(VkViewport));
     /* x, minDepth and y are 0 coz of memset */ 
-    vk_viewport.width = vk_sfc_caps.currentExtent.width;
-    vk_viewport.height = vk_sfc_caps.currentExtent.height;
+    vk_viewport.width = vkapp.SFCCAP.currentExtent.width;
+    vk_viewport.height = vkapp.SFCCAP.currentExtent.height;
     vk_viewport.maxDepth = 1.0f;
 
     memset(&vk_scissor, 0, sizeof(VkRect2D));
     /* offset = 0,0 coz yk */
-    vk_scissor.extent = vk_sfc_caps.currentExtent;
+    vk_scissor.extent = vkapp.SFCCAP.currentExtent;
 
     memset(&vk_pipeline_viewport_createinfo, 0, sizeof(VkPipelineViewportStateCreateInfo));
     vk_pipeline_viewport_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -751,7 +243,7 @@ int vkmain(int argc, char** argv)
     memset(&vk_pipeline_layout_createinfo, 0, sizeof(VkPipelineLayoutCreateInfo));
     vk_pipeline_layout_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 
-    if(vkCreatePipelineLayout(vk_dev, &vk_pipeline_layout_createinfo, NULL, &vk_pipeline_layout) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(vkapp.DEV, &vk_pipeline_layout_createinfo, NULL, &vk_pipeline_layout) != VK_SUCCESS)
     {
         perror("vkCreatePipelineLayout");
         return 1;
@@ -759,48 +251,6 @@ int vkmain(int argc, char** argv)
     
     memset(&vk_pipeline_layout_createinfo, 0, sizeof(VkPipelineLayoutCreateInfo));
     vk_pipeline_layout_createinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-
-    memset(&vk_colorattach, 0, sizeof(VkAttachmentDescription));
-    vk_colorattach.format = vk_sfc_formats[vk_sfc_ok].format;
-    vk_colorattach.samples = VK_SAMPLE_COUNT_1_BIT;
-    vk_colorattach.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    vk_colorattach.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    vk_colorattach.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    vk_colorattach.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    vk_colorattach.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    vk_colorattach.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    memset(&vk_colorattach_ref, 0, sizeof(VkAttachmentReference));
-    vk_colorattach_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    vk_colorattach_ref.attachment = 0;
-
-    memset(&vk_colorattach_subpass, 0, sizeof(VkSubpassDescription));
-    vk_colorattach_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    vk_colorattach_subpass.colorAttachmentCount = 1;
-    vk_colorattach_subpass.pColorAttachments = &vk_colorattach_ref;
-
-    memset(&vk_subpass_deps, 0, sizeof(VkSubpassDependency));
-    vk_subpass_deps.srcSubpass = VK_SUBPASS_EXTERNAL;
-    vk_subpass_deps.dstSubpass = 0;
-    vk_subpass_deps.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    vk_subpass_deps.srcAccessMask = 0;
-    vk_subpass_deps.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    vk_subpass_deps.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    memset(&vk_renderpass_createinfo, 0, sizeof(VkRenderPassCreateInfo));
-    vk_renderpass_createinfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    vk_renderpass_createinfo.attachmentCount = 1;
-    vk_renderpass_createinfo.pAttachments = &vk_colorattach;
-    vk_renderpass_createinfo.subpassCount = 1;
-    vk_renderpass_createinfo.pSubpasses = &vk_colorattach_subpass;
-    vk_renderpass_createinfo.dependencyCount = 1;
-    vk_renderpass_createinfo.pDependencies = &vk_subpass_deps;
-
-    if(vkCreateRenderPass(vk_dev, &vk_renderpass_createinfo, NULL, &vk_renderpass) != VK_SUCCESS)
-    {
-        perror("vkCreateRenderPass");
-        return 1;
-    }
 
     memset(&vk_pipeline_createinfo, 0, sizeof(VkGraphicsPipelineCreateInfo));
     vk_pipeline_createinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -814,38 +264,17 @@ int vkmain(int argc, char** argv)
     vk_pipeline_createinfo.pMultisampleState = &vk_pipeline_msaa_createinfo;
     vk_pipeline_createinfo.pColorBlendState = &vk_pipeline_colorblend_createinfo;
     vk_pipeline_createinfo.layout = vk_pipeline_layout;
-    vk_pipeline_createinfo.renderPass = vk_renderpass;
+    vk_pipeline_createinfo.renderPass = vkapp.RPASS;
     vk_pipeline_createinfo.subpass = 0;
     vk_pipeline_createinfo.basePipelineIndex = -1;
 
-    if(vkCreateGraphicsPipelines(vk_dev, VK_NULL_HANDLE, 1, &vk_pipeline_createinfo, NULL, &vk_pipeline) != VK_SUCCESS)
+    if(vkCreateGraphicsPipelines(vkapp.DEV, VK_NULL_HANDLE, 1, &vk_pipeline_createinfo, NULL, &vk_pipeline) != VK_SUCCESS)
     {
         perror("vkCreateGraphicsPipelines");
         return 1;
     }
 
-    vkDestroyShaderModule(vk_dev, vk_shader_vert, NULL);
-    vkDestroyShaderModule(vk_dev, vk_shader_frag, NULL);
-
-    memset(&vk_fbuf_createinfo, 0, sizeof(VkFramebufferCreateInfo));
-    vk_fbuf_createinfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    vk_fbuf_createinfo.renderPass = vk_renderpass;
-    vk_fbuf_createinfo.attachmentCount = 1;
-    vk_fbuf_createinfo.width = vk_sfc_caps.currentExtent.width;
-    vk_fbuf_createinfo.height = vk_sfc_caps.currentExtent.height;
-    vk_fbuf_createinfo.layers = 1;
-    vk_fbuf = malloc(vk_swapchain_imgs_count * sizeof(VkFramebuffer));
-    for(i = 0; i < vk_swapchain_imgs_count; i++)
-    {
-        vk_fbuf_createinfo.pAttachments = &vk_swapchain_imgs_views[i];
-        if(vkCreateFramebuffer(vk_dev, &vk_fbuf_createinfo, NULL, &vk_fbuf[i]) != VK_SUCCESS)
-        {
-            perror("vkCreateFramebuffer");
-            return 1;
-        }
-    }
-
-    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), 
+    if(!mkbuffer(vkapp.PHYDEV, vkapp.DEV, sizeof(vertices), 
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                 &vk_buf_staging, &vk_buf_staging_mem))
@@ -853,15 +282,15 @@ int vkmain(int argc, char** argv)
         return 1;
     }
 
-    if(vkMapMemory(vk_dev, vk_buf_staging_mem, 0, sizeof(vertices), 0, &mem) != VK_SUCCESS)
+    if(vkMapMemory(vkapp.DEV, vk_buf_staging_mem, 0, sizeof(vertices), 0, &mem) != VK_SUCCESS)
     {
         perror("vkMapMemory");
         return 1;
     }
     memcpy(mem, vertices, sizeof(vertices));
-    vkUnmapMemory(vk_dev, vk_buf_staging_mem);
+    vkUnmapMemory(vkapp.DEV, vk_buf_staging_mem);
 
-    if(!mkbuffer(vk_phydevs[usephydev], vk_dev, sizeof(vertices), 
+    if(!mkbuffer(vkapp.PHYDEV, vkapp.DEV, sizeof(vertices), 
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                 &vk_vbuf, &vk_vbuf_mem))
@@ -872,9 +301,9 @@ int vkmain(int argc, char** argv)
     memset(&vk_cmdpool_createinfo, 0, sizeof(VkCommandPoolCreateInfo));
     vk_cmdpool_createinfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     vk_cmdpool_createinfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    vk_cmdpool_createinfo.queueFamilyIndex = q_gfx_idx;
+    vk_cmdpool_createinfo.queueFamilyIndex = vkapp.QGFX_ID;
 
-    if(vkCreateCommandPool(vk_dev, &vk_cmdpool_createinfo, NULL, &vk_cmdpool) != VK_SUCCESS)
+    if(vkCreateCommandPool(vkapp.DEV, &vk_cmdpool_createinfo, NULL, &vk_cmdpool) != VK_SUCCESS)
     {
         perror("vkCreateCommandPool");
         return 1;
@@ -887,7 +316,7 @@ int vkmain(int argc, char** argv)
     vk_cmdbuf_allocinfo.commandPool = vk_cmdpool;
     vk_cmdbuf_allocinfo.commandBufferCount = vk_buffered_frames;
     vk_cmdbuf_allocinfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    if(vkAllocateCommandBuffers(vk_dev, &vk_cmdbuf_allocinfo, vk_cmdbuf) != VK_SUCCESS)
+    if(vkAllocateCommandBuffers(vkapp.DEV, &vk_cmdbuf_allocinfo, vk_cmdbuf) != VK_SUCCESS)
     {
         perror("vkAllocateCommandBuffers");
         return 1;
@@ -907,7 +336,7 @@ int vkmain(int argc, char** argv)
     for(i = 0; i < vk_buffered_frames; i++)
     {
 
-        if(vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_imgavail[i]) || vkCreateSemaphore(vk_dev, &vk_semphr_createinfo, NULL, &vk_semphr_rendered[i]) || vkCreateFence(vk_dev, &vk_fen_creatinfo, NULL, &vk_fen_tosfc[i]) != VK_SUCCESS)
+        if(vkCreateSemaphore(vkapp.DEV, &vk_semphr_createinfo, NULL, &vk_semphr_imgavail[i]) || vkCreateSemaphore(vkapp.DEV, &vk_semphr_createinfo, NULL, &vk_semphr_rendered[i]) || vkCreateFence(vkapp.DEV, &vk_fen_creatinfo, NULL, &vk_fen_tosfc[i]) != VK_SUCCESS)
         {
             perror("failed to create sync objs");
             return 1;
@@ -926,8 +355,8 @@ int vkmain(int argc, char** argv)
     vk_clear.color.float32[3] = 1.0f;
     /* offset is 0 */
     vk_renderpass_begininfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    vk_renderpass_begininfo.renderPass = vk_renderpass;
-    vk_renderpass_begininfo.renderArea.extent = vk_sfc_caps.currentExtent;
+    vk_renderpass_begininfo.renderPass = vkapp.RPASS;
+    vk_renderpass_begininfo.renderArea.extent = vkapp.SFCCAP.currentExtent;
     vk_renderpass_begininfo.clearValueCount = 1;
     vk_renderpass_begininfo.pClearValues = &vk_clear;
     
@@ -942,11 +371,11 @@ int vkmain(int argc, char** argv)
     vk_presentinfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     vk_presentinfo.waitSemaphoreCount = 1;
     vk_presentinfo.swapchainCount = 1;
-    vk_presentinfo.pSwapchains = &vk_swapchain;
+    vk_presentinfo.pSwapchains = &vkapp.SWAP;
         
-    vkGetDeviceQueue(vk_dev, q_gfx_idx, 0, &q_gfx);
+    vkGetDeviceQueue(vkapp.DEV, vkapp.QGFX_ID, 0, &vkapp.QGFX);
 
-    if(bufcpy(vk_dev, vk_cmdpool, q_gfx, vk_buf_staging, vk_vbuf, sizeof(vertices)) == 0)
+    if(bufcpy(vkapp.DEV, vk_cmdpool, vkapp.QGFX, vk_buf_staging, vk_vbuf, sizeof(vertices)) == 0)
     {
         perror("bufcpy failed");
         return 1;
@@ -954,14 +383,13 @@ int vkmain(int argc, char** argv)
 
     while(vkwindow.RUNNING)
     {
-        window_poll(&vkwindow);
-
         /*draw time ! */
-        vkWaitForFences(vk_dev, 1, &vk_fen_tosfc[vk_current_frame], VK_TRUE, UINT64_MAX);
+        vkWaitForFences(vkapp.DEV, 1, &vk_fen_tosfc[vk_current_frame], VK_TRUE, UINT64_MAX);
 
-        vkResetFences(vk_dev, 1, &vk_fen_tosfc[vk_current_frame]);
+        vkResetFences(vkapp.DEV, 1, &vk_fen_tosfc[vk_current_frame]);
 
-        vkAcquireNextImageKHR(vk_dev, vk_swapchain, UINT64_MAX, vk_semphr_imgavail[vk_current_frame], VK_NULL_HANDLE, &vk_swapchain_imgidx);
+        vkres = vkAcquireNextImageKHR(vkapp.DEV, vkapp.SWAP, UINT64_MAX, vk_semphr_imgavail[vk_current_frame], VK_NULL_HANDLE, &vk_swapchain_imgidx);
+
 
         vkResetCommandBuffer(vk_cmdbuf[vk_current_frame], 0);
 
@@ -970,7 +398,7 @@ int vkmain(int argc, char** argv)
             perror("vkBeginCommandBuffer");
             return 1;
         }
-        vk_renderpass_begininfo.framebuffer = vk_fbuf[vk_swapchain_imgidx];
+        vk_renderpass_begininfo.framebuffer = vkapp.FBUF[vk_swapchain_imgidx];
         vkCmdBeginRenderPass(vk_cmdbuf[vk_current_frame], &vk_renderpass_begininfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(vk_cmdbuf[vk_current_frame], VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
         vkCmdBindVertexBuffers(vk_cmdbuf[vk_current_frame], 0, 1, &vk_vbuf, vk_vbuf_off);
@@ -986,7 +414,7 @@ int vkmain(int argc, char** argv)
         vk_submitinfo.pWaitSemaphores = &vk_semphr_imgavail[vk_current_frame];
         vk_submitinfo.pSignalSemaphores = &vk_semphr_rendered[vk_current_frame];
         vk_submitinfo.pCommandBuffers = &vk_cmdbuf[vk_current_frame];
-        if(vkQueueSubmit(q_gfx, 1, &vk_submitinfo, vk_fen_tosfc[vk_current_frame]) != VK_SUCCESS)
+        if(vkQueueSubmit(vkapp.QGFX, 1, &vk_submitinfo, vk_fen_tosfc[vk_current_frame]) != VK_SUCCESS)
         {
             perror("vkQueueSubmit");
             return 1;
@@ -994,59 +422,51 @@ int vkmain(int argc, char** argv)
 
          vk_presentinfo.pImageIndices = &vk_swapchain_imgidx;
          vk_presentinfo.pWaitSemaphores = &vk_semphr_rendered[vk_current_frame];
-         vkQueuePresentKHR(q_gfx, &vk_presentinfo);
+         vkQueuePresentKHR(vkapp.QGFX, &vk_presentinfo);
          vk_current_frame = (vk_current_frame + 1) % vk_buffered_frames;
+
+        if(vkres == VK_SUBOPTIMAL_KHR)
+        {
+            vkapp_swapchain(&vkapp);
+            vk_renderpass_begininfo.renderArea.extent = vkapp.SFCCAP.currentExtent;
+            vk_renderpass_begininfo.renderPass = vkapp.RPASS;
+            vk_viewport.width = vkapp.SFCCAP.currentExtent.width;
+            vk_viewport.height = vkapp.SFCCAP.currentExtent.height;
+            vk_scissor.extent = vkapp.SFCCAP.currentExtent;
+            vk_pipeline_createinfo.renderPass = vkapp.RPASS;
+            vkDestroyPipeline(vkapp.DEV, vk_pipeline, NULL);
+            if(vkCreateGraphicsPipelines(vkapp.DEV, VK_NULL_HANDLE, 1, &vk_pipeline_createinfo, NULL, &vk_pipeline) != VK_SUCCESS)
+            {
+                perror("vkCreateGraphicsPipelines");
+                return 1;
+            }
+
+        }
+        window_poll(&vkwindow);
     }
 
-    vkDeviceWaitIdle(vk_dev);
+    vkDeviceWaitIdle(vkapp.DEV);
 
-    vkDestroyBuffer(vk_dev, vk_buf_staging, NULL);
-    vkFreeMemory(vk_dev, vk_buf_staging_mem, NULL);
-    vkDestroyBuffer(vk_dev, vk_vbuf, NULL);
-    vkFreeMemory(vk_dev, vk_vbuf_mem, NULL);
+    vkDestroyBuffer(vkapp.DEV, vk_buf_staging, NULL);
+    vkFreeMemory(vkapp.DEV, vk_buf_staging_mem, NULL);
+    vkDestroyBuffer(vkapp.DEV, vk_vbuf, NULL);
+    vkFreeMemory(vkapp.DEV, vk_vbuf_mem, NULL);
     for(i = 0; i < vk_buffered_frames; i++)
     {
-        vkDestroySemaphore(vk_dev, vk_semphr_rendered[i], NULL);
-        vkDestroySemaphore(vk_dev, vk_semphr_imgavail[i], NULL);
-        vkDestroyFence(vk_dev, vk_fen_tosfc[i], NULL);
+        vkDestroySemaphore(vkapp.DEV, vk_semphr_rendered[i], NULL);
+        vkDestroySemaphore(vkapp.DEV, vk_semphr_imgavail[i], NULL);
+        vkDestroyFence(vkapp.DEV, vk_fen_tosfc[i], NULL);
     }
+    vkDestroyCommandPool(vkapp.DEV, vk_cmdpool, NULL);
+    vkDestroyShaderModule(vkapp.DEV, vk_shader_vert, NULL);
+    vkDestroyShaderModule(vkapp.DEV, vk_shader_frag, NULL);
 
-        for(i = 0; i < vk_swapchain_imgs_count; i++)
-    {
-        vkDestroyImageView(vk_dev, vk_swapchain_imgs_views[i], NULL);
-    }
-    for(i = 0; i < vk_swapchain_imgs_count; i++)
-    {
-        vkDestroyFramebuffer(vk_dev, vk_fbuf[i], NULL);
-    }
-    vkDestroyCommandPool(vk_dev, vk_cmdpool, NULL);
-    vkDestroyPipeline(vk_dev, vk_pipeline, NULL);
-    vkDestroyPipelineLayout(vk_dev, vk_pipeline_layout, NULL);
-    vkDestroyRenderPass(vk_dev, vk_renderpass, NULL);
-    vkDestroySwapchainKHR(vk_dev, vk_swapchain, NULL);
-    vkDestroyDevice(vk_dev, NULL);
-    vkDestroySurfaceKHR(vk_inst, vk_sfc, NULL);
-    destroy_dbg_util_msgr(vk_inst, vk_dbgmsg, NULL);
-    vkDestroyInstance(vk_inst, NULL);
+    vkDestroyPipeline(vkapp.DEV, vk_pipeline, NULL);
+    vkDestroyPipelineLayout(vkapp.DEV, vk_pipeline_layout, NULL);
+    vkapp_destroy(&vkapp);
 
     window_destroy(&vkwindow);
     window_terminate();
-
-    free(neededexts_inst);
-    free(vk_extprops_inst);
-    if(layer_count > 0){
-        free(vk_layerprops);
-    }
-    free(vk_phydevs);
-    free(vk_phydevs_props);
-    free(vk_phydevs_feats);
-    free(vk_q_props);
-    free(vk_extprops_dev);
-    free(vk_sfc_formats);
-    free(vk_sfc_presentmodes);
-    free(vk_swapchain_imgs);
-    free(vk_swapchain_imgs_views);
-    free(vk_fbuf);
     free(vk_cmdbuf);
     free(vk_semphr_imgavail);
     free(vk_semphr_rendered);
