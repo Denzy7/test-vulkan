@@ -76,7 +76,7 @@ int window_create(struct window* window)
     size_t wcs_len = 0;
 
     if(window->title != NULL)   
-        wcs_len = mbstowcs(NULL, NULL, 0);
+        wcs_len = mbstowcs(NULL, window->title, 0);
 
     wcs = calloc(wcs_len + 1, sizeof(wchar_t));
 
@@ -85,7 +85,6 @@ int window_create(struct window* window)
         perror("mbstowcs");
         return 0;
     }
-
     winapi.hwnd = CreateWindowExW(
             0, 
             wc.lpszClassName,
