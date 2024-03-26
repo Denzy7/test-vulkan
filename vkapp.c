@@ -586,7 +586,7 @@ int vkapp_swapchain(struct vkapp* vkapp)
         }
     }
     /*use vsync*/
-    if(j == -1)
+    if(j == -1 || vkapp->usevsync)
         j = VK_PRESENT_MODE_FIFO_KHR;
 
     memset(&vk_swapchain_createinfo, 0, sizeof(VkSwapchainCreateInfoKHR));

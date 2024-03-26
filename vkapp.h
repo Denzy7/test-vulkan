@@ -13,6 +13,7 @@ struct vkapp{
     /* USER DEFINED */
 
     int uselayers;
+    int usevsync;
     int bufferedframes; 
     VkSurfaceKHR surface;
 
